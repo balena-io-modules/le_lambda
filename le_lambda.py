@@ -12,6 +12,7 @@ import zlib
 import json
 import certifi
 import os
+from collections import OrderedDict
 from uuid import UUID
 
 
@@ -65,25 +66,30 @@ def lambda_handler(event, context):
                     request = line[11].split(' ')
                     idx = request[1].find('/', 9)
                     url = request[1][idx:]
-                    parsed = {
-                        'timestamp': line[0],
-                        'elb_name': line[1],
-                        'client_ip': line[2].split(':')[0],
-                        'backend_ip': line[3].split(':')[0],
-                        'request_processing_time': line[4],
-                        'backend_processing_time': line[5],
-                        'response_processing_time': line[6],
-                        'elb_status_code': line[7],
-                        'backend_status_code': line[8],
-                        'received_bytes': line[9],
-                        'sent_bytes': line[10],
-                        'method': request[0],
-                        'url': url,
-                        'user_agent': line[12],
-                        'ssl_cipher': line[13],
-                        'ssl_protocol': line[14]
-                    }
-                    msg = json.dumps(parsed)
+                    parsed = OrderedDict()
+                    parsed['timestamp'] = line[0]
+                    parsed['elb_name'] = line[1]
+                    parsed['client_ip'] = line[2].split(':')[0]
+                    parsed['backend_ip'] = line[3].split(':')[0]
+                    parsed['request_processing_time'] = line[4]
+                    parsed['backend_processing_time'] = line[5]
+                    parsed['response_processing_time'] = line[6]
+                    parsed['elb_status_code'] = line[7]
+                    parsed['backend_status_code'] = line[8]
+                    parsed['received_bytes'] = line[9]
+                    parsed['sent_bytes'] = line[10]
+                    parsed['method'] = request[0]
+                    parsed['url'] = url
+                    parsed['user_agent'] = line[12]
+                    parsed['ssl_cipher'] = line[13]
+                    parsed['ssl_protocol'] = line[14]
+                    mask = [
+                        'elb_name',
+                        'ssl_cipher'
+                    ]
+                    msg = ' '.join([
+                        '"{}"'.format(str(value)) for value in mask_parsed(parsed, mask).values()
+                    ])
                     sock.sendall('{} {}\n'.format(TOKEN, msg))
                 logger.info('Finished sending file={} to R7'.format(key))
             elif validate_alb_log(str(key)) is True:
@@ -97,31 +103,42 @@ def lambda_handler(event, context):
                     try:
                         request = line[12].split(' ')
                         url = request[1]
-                        parsed = {
-                            'type': line[0],
-                            'timestamp': line[1],
-                            'elb_id': line[2],
-                            'client_ip': line[3].split(':')[0],
-                            'client_port': line[3].split(':')[1],
-                            'target_ip': line[4].split(':')[0],
-                            'target_port': line[4].split(':')[1],
-                            'request_processing_time': line[5],
-                            'target_processing_time': line[6],
-                            'response_processing_time': line[7],
-                            'elb_status_code': line[8],
-                            'target_status_code': line[9],
-                            'received_bytes': line[10],
-                            'sent_bytes': line[11],
-                            'method': request[0],
-                            'url': url,
-                            'http_version' :request[2],
-                            'user_agent': line[13],
-                            'ssl_cipher': line[14],
-                            'ssl_protocol': line[15],
-                            'target_group_arn': line[16],
-                            'trace_id': line[17]
-                        }
-                        msg = json.dumps(parsed)
+                        try:
+                            http_version = request[2].split('/')[-1:][0]
+                        except:
+                            http_version = request[2]
+                        parsed = OrderedDict()
+                        parsed['type'] = line[0]
+                        parsed['timestamp'] = line[1]
+                        parsed['elb_id'] = line[2]
+                        parsed['client_ip'] = line[3].split(':')[0]
+                        parsed['client_port'] = line[3].split(':')[1]
+                        parsed['target_ip'] = line[4].split(':')[0]
+                        parsed['target_port'] = line[4].split(':')[1]
+                        parsed['request_processing_time'] = line[5]
+                        parsed['target_processing_time'] = line[6]
+                        parsed['response_processing_time'] = line[7]
+                        parsed['elb_status_code'] = line[8]
+                        parsed['target_status_code'] = line[9]
+                        parsed['received_bytes'] = line[10]
+                        parsed['sent_bytes'] = line[11]
+                        parsed['method'] = request[0]
+                        parsed['url'] = url
+                        parsed['http_version'] = http_version
+                        parsed['user_agent'] = line[13]
+                        parsed['ssl_cipher'] = line[14]
+                        parsed['ssl_protocol'] = line[15]
+                        parsed['target_group_arn'] = line[16]
+                        parsed['trace_id'] = line[17]
+                        mask = [
+                            'elb_id',
+                            'ssl_cipher',
+                            'target_group_arn',
+                            'trace_id'
+                        ]
+                        msg = ' '.join([
+                            '"{}"'.format(str(value)) for value in mask_parsed(parsed, mask).values()
+                        ])
                         sock.sendall('{} {}\n'.format(TOKEN, msg))
                         good_run_count += 1
                     except IndexError:
@@ -231,3 +248,15 @@ def validate_ct_log(key):
     regex = re.compile('\d+_CloudTrail_\w{2}-\w{4,9}-[12]_\d{8}T\d{4}Z.+.json.gz$', re.I)
     match = regex.search(key)
     return bool(match)
+
+def mask_parsed(parsed, mask=[]):
+    for key in mask: parsed[key] = '-'
+    for key in list(parsed):
+        try:
+            try:
+                assert float(parsed[key])
+            except AssertionError:
+               parsed[key] = '0'
+        except ValueError:
+            pass
+    return parsed
